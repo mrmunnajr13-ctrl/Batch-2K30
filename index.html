@@ -292,10 +292,11 @@
 </div>
 <div id="toast" class="fixed bottom-24 left-1/2 -translate-x-1/2 z-[90] px-4 py-2.5 rounded-full bg-slate-900 text-white text-xs font-medium shadow-xl opacity-0 pointer-events-none transition-opacity duration-300"></div>
 
-<!-- ================= FIREBASE SDK (No Storage) ================= -->
+<!-- ================= FIREBASE & ONESIGNAL SDK ================= -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 
 <script>
 /* =========================================================
@@ -316,6 +317,23 @@ firebase.initializeApp(firebaseConfig);
 const auth    = firebase.auth();
 const db      = firebase.firestore();
 const FV      = firebase.firestore.FieldValue;
+
+/* =========================================================
+   ONESIGNAL CONFIGURATION (এখানে আপনার কোড বসান)
+   ========================================================= */
+const ONESIGNAL_APP_ID = "a6ea84be-f6f7-457c-9def-85da02a4fa65"; 
+const ONESIGNAL_REST_KEY = "os_v2_app_u3vijpxw65cxzhppqxnafjh2mvje2e74u5jumnevuwbcbhg64zs4smkulhzuwgqxlagg4slnj4prehgk3vap5mtue2k5g6ndvh6i6oa"; 
+
+window.OneSignalDeferred = window.OneSignalDeferred || [];
+OneSignalDeferred.push(async function(OneSignal) {
+  await OneSignal.init({
+    appId: ONESIGNAL_APP_ID,
+    notifyButton: { enable: false },
+    allowLocalhostAsSecureOrigin: true,
+  });
+  await OneSignal.Notifications.requestPermission();
+});
+
 
 /* =========================================================
    2) STATE & HELPERS
@@ -471,7 +489,45 @@ function toggleAudio(container, url){
   bars.forEach((b, i) => { b.style.animation = `soundwave 0.8s infinite ease-in-out`; b.style.animationDelay = `${i * 0.05}s`; });
 }
 
-async function pushMessage(payload){ await db.collection('messages').add({ uid: fbUser.uid, name: myProfile.name, photo: myProfile.photo, createdAt: FV.serverTimestamp(), ...payload }); }
+/* =========================================================
+   PUSH NOTIFICATION WITH MESSAGE
+   ========================================================= */
+async function pushMessage(payload){ 
+  // ফায়ারবেসে মেসেজ সেভ
+  await db.collection('messages').add({ 
+    uid: fbUser.uid, 
+    name: myProfile.name, 
+    photo: myProfile.photo, 
+    createdAt: FV.serverTimestamp(), 
+    ...payload 
+  });
+  
+  // OneSignal এ নোটিফিকেশন পাঠানো
+  let bodyText = '';
+  if (payload.type === 'text') bodyText = payload.text?.substring(0, 100) || 'নতুন মেসেজ';
+  else if (payload.type === 'image') bodyText = '📷 একটি ছবি পাঠিয়েছে';
+  else if (payload.type === 'audio') bodyText = '🎤 ভয়েস মেসেজ পাঠিয়েছে';
+  
+  try {
+    await fetch('https://onesignal.com/api/v1/notifications', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Basic ${ONESIGNAL_REST_KEY}`
+      },
+      body: JSON.stringify({
+        app_id: ONESIGNAL_APP_ID,
+        included_segments: ['Subscribed Users'], 
+        headings: { en: `Batch 2K30 - ${myProfile.name}` },
+        contents: { en: bodyText },
+        url: window.location.href
+      })
+    });
+    console.log('Notification Sent ✅');
+  } catch(err) {
+    console.error('Notification Failed ❌', err);
+  }
+}
 
 async function sendText(){
   const input = document.getElementById('msgInput'); const text = input.value.trim(); if(!text) return;
